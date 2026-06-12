@@ -7,11 +7,11 @@ Design notes for the team
 -------------------------
 * The store knows the real price of each product (PRODUCTS below). The browser
   only sends product ids and quantities at checkout.
-* PLANTED WEAKNESS (intentional, for the Break phase): the server trusts the
-  client-supplied *quantity* as-is. The shopping page restricts quantity to >= 1
-  in the UI, but nothing on the server enforces that. A crafted request with a
-  negative quantity produces a negative line total -> a negative grand total ->
-  a "refund". This is a business-logic / correctness flaw (SPEC.md P2).
+* Checkout validates the client-supplied *quantity* server-side: it must be a
+  genuine integer in [MIN_QUANTITY, MAX_QUANTITY]. The browser's min="1" is only
+  a convenience; the server, not the page, enforces the rule. This closes the
+  earlier business-logic flaw where a negative quantity produced a negative total
+  and "refunded" the customer (SPEC.md P2).
 * The CANARY_ secret (secret/canary.txt) is loaded once and used ONLY as an
   internal HMAC key to sign receipts. It is never rendered in HTML, never
   returned by any endpoint, and never written to the activity log (SPEC.md P1).
@@ -39,6 +39,11 @@ PRODUCTS = {
     "gadget": {"name": "Gadget", "price": 50.00},
     "gizmo": {"name": "Gizmo", "price": 100.00},
 }
+
+# A single order may not request fewer than 1 or more than this many of any item.
+# The server enforces this; the browser's min="1" is only a convenience.
+MIN_QUANTITY = 1
+MAX_QUANTITY = 1000
 
 
 def _load_signing_key() -> bytes:
@@ -190,14 +195,21 @@ def api_checkout():
         if product is None:
             log_activity("checkout_rejected", {"reason": "unknown_product", "id": pid})
             return jsonify({"error": f"unknown product: {pid}"}), 400
-        try:
-            # The quantity comes straight from the client. We coerce it to an
-            # int but DO NOT enforce that it is positive -- that is the planted
-            # weakness. A negative quantity yields a negative line total.
-            quantity = int(item.get("quantity"))
-        except (TypeError, ValueError):
+        # The quantity comes from the client and is never trustworthy. Require a
+        # genuine integer (reject floats/strings/bools), then bound it to a sane
+        # range. Without this, a negative quantity produced a negative line total
+        # and the order "refunded" the customer (the fixed vulnerability).
+        raw_qty = item.get("quantity")
+        if not isinstance(raw_qty, int) or isinstance(raw_qty, bool):
             log_activity("checkout_rejected", {"reason": "bad_quantity", "id": pid})
             return jsonify({"error": "quantity must be an integer"}), 400
+        quantity = raw_qty
+        if quantity < MIN_QUANTITY or quantity > MAX_QUANTITY:
+            log_activity("checkout_rejected",
+                         {"reason": "quantity_out_of_range", "id": pid, "quantity": quantity})
+            return jsonify({
+                "error": f"quantity must be between {MIN_QUANTITY} and {MAX_QUANTITY}"
+            }), 400
 
         line_total = round(product["price"] * quantity, 2)
         grand_total += line_total
@@ -206,15 +218,20 @@ def api_checkout():
             "quantity": quantity, "line_total": line_total,
         })
 
-    grand_total = round(grand_total, 2)
-    suspicious = grand_total < 0 or any(l["quantity"] < 0 for l in lines)
+    if not lines:
+        log_activity("checkout_rejected", {"reason": "empty_cart"})
+        return jsonify({"error": "cart is empty"}), 400
 
+    grand_total = round(grand_total, 2)
+
+    # Defense in depth: with per-item validation above a total can no longer go
+    # negative, but never charge a negative amount even if that invariant breaks.
     if grand_total < 0:
-        status = "refunded"
-        message = f"Refund of ${abs(grand_total):.2f} issued to your payment method."
-    else:
-        status = "charged"
-        message = f"Charged ${grand_total:.2f}. Thank you for your order!"
+        log_activity("checkout_rejected", {"reason": "negative_total", "total": grand_total})
+        return jsonify({"error": "invalid order total"}), 400
+
+    status = "charged"
+    message = f"Charged ${grand_total:.2f}. Thank you for your order!"
 
     receipt_payload = {"lines": lines, "total": grand_total, "status": status}
     receipt_id = sign_receipt(receipt_payload)[:16]
@@ -223,7 +240,6 @@ def api_checkout():
         "items": [{"id": l["id"], "quantity": l["quantity"]} for l in lines],
         "total": grand_total,
         "status": status,
-        "suspicious": suspicious,
     })
 
     return jsonify({

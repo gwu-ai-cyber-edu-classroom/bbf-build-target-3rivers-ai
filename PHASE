@@ -1,4 +1,4 @@
-build
+fix
 # The current Build-it / Break-it / Fix-it phase for THIS working copy.
 # First line must be one of: build | break | fix   (AGENTS.md reads the first line)
 #
