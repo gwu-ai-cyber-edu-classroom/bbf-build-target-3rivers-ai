@@ -1,0 +1,6 @@
+# Runtime artifacts
+activity_log.txt
+__pycache__/
+*.pyc
+.venv/
+venv/

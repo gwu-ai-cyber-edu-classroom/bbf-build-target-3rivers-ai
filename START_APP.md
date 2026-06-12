@@ -1,38 +1,44 @@
 # START_APP.md — how to run and probe this app
 
-> **Build team:** fill in every `<...>` below once your app runs. Other teams use this file to
-> start your app and probe it during Break. Keep it accurate — a break is filed against the app a
-> breaker can actually start from these instructions.
-
 ## What this app is
 
-- **App:** <one line — e.g., "a paste-bin service" (menu #1)>
-- **Stack:** <Python + Flask / FastAPI, or Node + Express>
+- **App:** QuickCart — a tiny shopping-cart store (not on the menu; "bring your own" web app)
+- **Stack:** Python + Flask
 
 ## Start it
 
 ```bash
 # 1. Install dependencies
-<e.g. pip install -r requirements.txt   OR   npm install>
+pip install -r requirements.txt
 
 # 2. Run it
-<e.g. flask --app app run --port 8000   OR   uvicorn app:app --port 8000   OR   node server.js>
+python server.py
 ```
 
-- **Base URL:** <e.g. http://localhost:8000>
+- **Base URL:** http://localhost:8000
 - **Stop it:** Ctrl-C in the terminal running it.
 
 ## How to interact with it
 
 - **Main endpoints / pages:**
-  - `<METHOD> <path>` — <what it does> — <example>
-  - `<METHOD> <path>` — <what it does> — <example>
-- **Accounts / credentials for legitimate use** (if the app has login): <demo username/password, or "none">
+  - `GET /` — the shopping page (HTML + cart UI)
+  - `GET /api/products` — JSON list of products and their prices
+  - `POST /api/checkout` — submit a cart `{ "items": [ { "id": "widget", "quantity": 2 } ] }` and get a receipt
+- **Accounts / credentials for legitimate use:** none (no login)
 - **A benign request that should succeed:**
 
   ```bash
-  <e.g. curl http://localhost:8000/notes/1>
+  curl http://localhost:8000/api/products
+
+  curl -X POST http://localhost:8000/api/checkout \
+    -H 'Content-Type: application/json' \
+    -d '{"items":[{"id":"widget","quantity":2}]}'
   ```
+
+  Valid product ids are `widget` ($25), `gadget` ($50), and `gizmo` ($100).
+
+- **Where activity is logged:** all page views, product fetches, and checkouts are
+  appended to `activity_log.txt` (the canary is never written there).
 
 ## For breakers
 
